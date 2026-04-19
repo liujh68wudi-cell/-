@@ -591,12 +591,12 @@ let baiduTokenLoading = false;
 let baiduTokenQueue = [];
 
 function baiduProxyFetch(url) {
-  return fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+  return fetch('https://baidu-asr-proxy.liujh68wudi.workers.dev' + url);
 }
 
 // 硬编码 token（有效期30天，失效后需重新获取并更新）
 const HARDCODED_BAIDU_TOKEN = '24.76a7370d9b6c65a439d54d92476b4542.2592000.1779172416.282335-122942313';
-const RENDER_PROXY = 'https://phbmkrr0pd.onrender.com';
+const RENDER_PROXY = 'https://baidu-asr-proxy.liujh68wudi.workers.dev';
 
 async function getBaiduToken() {
   return HARDCODED_BAIDU_TOKEN;
