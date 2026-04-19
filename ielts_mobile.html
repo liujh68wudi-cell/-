@@ -615,6 +615,7 @@ async function recognizeByBaidu(blob) {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+    console.log('[ASR] Sending to proxy, base64 length:', base64.length, 'format: wav, rate: 16000, dev_pid:', '1737');
     const res = await fetch(RENDER_PROXY + '/asr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -699,12 +700,16 @@ function blobToWav(blob) {
           const offCtx = new OfflineAudioContext(1, resampledLen, targetRate);
           const src = offCtx.createBufferSource();
           src.buffer = nativeBuf;
-          offCtx.start();
+          src.connect(offCtx.destination);
+          src.start();
           offCtx.startRendering().then(resampledBuf => {
+          offCtx.startRendering().then(resampledBuf => {
+            console.log('[ASR] Resampled:', nativeRate, '->', resampledBuf.sampleRate, 'Hz, samples:', resampledBuf.length);
             ac.close();
             // encodeWav 写入的 sampleRate = resampledBuf.sampleRate = 16000 ✅
             resolve(encodeWav(resampledBuf, 1));
           }).catch(e => {
+            console.log('[ASR] OfflineAudioContext failed, using native rate:', nativeRate);
             ac.close();
             // Offline 失败时用原生音频（按原采样率发百度）
             resolve(encodeWav(nativeBuf, 1));
