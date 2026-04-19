@@ -62,8 +62,7 @@ http.createServer((req, res) => {
         return;
       }
 
-      // Baidu API 接收 PCM 或 WAV (16kHz mono)
-      const format = bd.format || 'wav';
+      const format = bd.format || 'pcm';
       const rate = bd.rate || 16000;
       const dev_pid = bd.dev_pid || '1737';
       const token = bd.token;
@@ -75,27 +74,35 @@ http.createServer((req, res) => {
         return;
       }
 
-      // 用 URLSearchParams 方式（application/x-www-form-urlencoded）上传
-      // 百度 server_api 支持这种方式，音频 base64 放 speex 参数
-      const params = new URLSearchParams({
+      // Decode base64 speech to get byte length
+      let speechBytes = 0;
+      try {
+        const binary = Buffer.from(bd.speech || '', 'base64');
+        speechBytes = binary.length;
+      } catch (e) {
+        speechBytes = Math.floor((bd.speech || '').length * 3 / 4);
+      }
+
+      // Use application/json for Baidu server_api
+      const baiduBody = JSON.stringify({
+        speech: bd.speech || '',
+        len: speechBytes,
         token: token,
         format: format,
-        rate: String(rate),
-        dev_pid: String(dev_pid),
-        channel: '1',
-        speech: bd.speech || '',
-        len: String(Math.floor((bd.speech || '').length * 3 / 4))
+        rate: Number(rate),
+        dev_pid: Number(dev_pid) || 1737,
+        channel: 1
       });
 
-      const postData = params.toString();
       const options2 = {
         hostname: 'vop.baidu.com',
         port: 443,
         path: '/server_api',
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(postData)
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(baiduBody),
+          'User-Agent': 'Mozilla/5.0'
         }
       };
 
@@ -117,13 +124,13 @@ http.createServer((req, res) => {
         res.end(JSON.stringify({ err_no: 1003, err_msg: e.message }));
       });
 
-      pr.write(postData);
+      pr.write(baiduBody);
       pr.end();
     });
     return;
   }
 
-  // 未知路由
+  // Unknown route
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ err_no: 404, err_msg: 'Not found' }));
