@@ -677,18 +677,39 @@ function stopMediaRecording() {
   });
 }
 
-// blob 转 WAV
+// blob 转 WAV（强制重采样到 16kHz）
 function blobToWav(blob) {
   return new Promise((resolve, reject) => {
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      // 步骤1：用在线 AudioContext 解码原始音频
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
       const reader = new FileReader();
       reader.onload = () => {
-        audioCtx.decodeAudioData(reader.result).then(ab => {
-          const wav = encodeWav(ab, 1);
-          audioCtx.close();
-          resolve(wav);
-        }).catch(e => { audioCtx.close(); reject(e); });
+        ac.decodeAudioData(reader.result).then(nativeBuf => {
+          const nativeRate = nativeBuf.sampleRate;
+          const targetRate = 16000;
+          // 步骤2：如果是原生 16kHz 直接编码
+          if (nativeRate === targetRate) {
+            ac.close();
+            resolve(encodeWav(nativeBuf, 1));
+            return;
+          }
+          // 步骤3：用 OfflineAudioContext 强制重采样到 16kHz
+          const resampledLen = Math.ceil(nativeBuf.length * targetRate / nativeRate);
+          const offCtx = new OfflineAudioContext(1, resampledLen, targetRate);
+          const src = offCtx.createBufferSource();
+          src.buffer = nativeBuf;
+          offCtx.start();
+          offCtx.startRendering().then(resampledBuf => {
+            ac.close();
+            // encodeWav 写入的 sampleRate = resampledBuf.sampleRate = 16000 ✅
+            resolve(encodeWav(resampledBuf, 1));
+          }).catch(e => {
+            ac.close();
+            // Offline 失败时用原生音频（按原采样率发百度）
+            resolve(encodeWav(nativeBuf, 1));
+          });
+        }).catch(e => { ac.close(); reject(e); });
       };
       reader.onerror = reject;
       reader.readAsArrayBuffer(blob);
