@@ -74,7 +74,7 @@ http.createServer((req, res) => {
         return;
       }
 
-      // Decode base64 speech to get byte length
+      // Decode base64 speech to get accurate byte length (WAV header bytes included in base64)
       let speechBytes = 0;
       try {
         const binary = Buffer.from(bd.speech || '', 'base64');
@@ -83,7 +83,8 @@ http.createServer((req, res) => {
         speechBytes = Math.floor((bd.speech || '').length * 3 / 4);
       }
 
-      // Use application/json for Baidu server_api
+      // cuid: device unique ID, must be alphanumeric, 4-48 chars
+      const cuid = 'ie_' + Math.random().toString(36).substr(2, 10) + Date.now().toString(36);
       const baiduBody = JSON.stringify({
         speech: bd.speech || '',
         len: speechBytes,
@@ -91,7 +92,8 @@ http.createServer((req, res) => {
         format: format,
         rate: Number(rate),
         dev_pid: Number(dev_pid) || 1737,
-        channel: 1
+        channel: 1,
+        cuid: cuid
       });
 
       const options2 = {
