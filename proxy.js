@@ -22,8 +22,12 @@ function forward(req, res, targetUrl, method) {
   });
   pr.on('error', e => { res.writeHead(502); res.end(e.message); });
   if (method === 'POST') {
-    let d = ''; req.on('data', c => d += c); req.on('end', () => { pr.write(d); pr.end(); });
-  } else { pr.end(); }
+    let d = '';
+    req.on('data', c => d += c);
+    req.on('end', () => { pr.write(d); pr.end(); });
+  } else {
+    pr.end();
+  }
 }
 
 http.createServer((req, res) => {
@@ -33,46 +37,94 @@ http.createServer((req, res) => {
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type'
     });
-    res.end(); return;
+    res.end();
+    return;
   }
+
   const u = new URL(req.url, 'http://x');
+
   if (u.pathname === '/token') {
     forward(req, res, 'https://aip.baidubce.com/oauth/2.0/token?' + u.searchParams.toString(), 'GET');
-  } else if (u.pathname === '/asr') {
-    let body = ''; req.on('data', c => body += c);
+    return;
+  }
+
+  if (u.pathname === '/asr') {
+    let body = '';
+    req.on('data', c => body += c);
     req.on('end', () => {
-      const bd = JSON.parse(body);
-      const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
-      const audioBuf = Buffer.from(bd.speech, 'base64');
-      const headerBuf = Buffer.from([
-        '--' + boundary,
-        'Content-Disposition: form-data; name="token"\r\n\r\n' + bd.token,
-        '--' + boundary,
-        'Content-Disposition: form-data; name="format"\r\n\r\n' + (bd.format || 'pcm'),
-        '--' + boundary,
-        'Content-Disposition: form-data; name="rate"\r\n\r\n' + String(bd.rate || 16000),
-        '--' + boundary,
-        'Content-Disposition: form-data; name="dev_pid"\r\n\r\n' + String(bd.dev_pid || '1737'),
-        '--' + boundary,
-        'Content-Disposition: form-data; name="channel"\r\n\r\n1',
-        '--' + boundary,
-        'Content-Disposition: form-data; name="speech"; filename="recording.pcm"\r\nContent-Type: audio/pcm\r\n\r\n'
-      ].join('\r\n'));
-      const endBuf = Buffer.from('\r\n--' + boundary + '--\r\n');
-      const fullBody = Buffer.concat([headerBuf, audioBuf, endBuf]);
+      let bd;
+      try {
+        bd = JSON.parse(body);
+      } catch (e) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ err_no: 1001, err_msg: 'Invalid JSON body' }));
+        return;
+      }
+
+      // Baidu API 接收 PCM 或 WAV (16kHz mono)
+      const format = bd.format || 'wav';
+      const rate = bd.rate || 16000;
+      const dev_pid = bd.dev_pid || '1737';
+      const token = bd.token;
+
+      if (!token) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ err_no: 1002, err_msg: 'Missing token' }));
+        return;
+      }
+
+      // 用 URLSearchParams 方式（application/x-www-form-urlencoded）上传
+      // 百度 server_api 支持这种方式，音频 base64 放 speex 参数
+      const params = new URLSearchParams({
+        token: token,
+        format: format,
+        rate: String(rate),
+        dev_pid: String(dev_pid),
+        channel: '1',
+        speech: bd.speech || '',
+        len: String(Math.floor((bd.speech || '').length * 3 / 4))
+      });
+
+      const postData = params.toString();
       const options2 = {
-        hostname: 'vop.baidu.com', port: 443, path: '/server_api', method: 'POST',
-        headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': fullBody.length }
+        hostname: 'vop.baidu.com',
+        port: 443,
+        path: '/server_api',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData)
+        }
       };
+
       const pr = https.request(options2, prx => {
-        let d = ''; prx.on('data', c => d += c); prx.on('end', () => {
+        let d = '';
+        prx.on('data', c => d += c);
+        prx.on('end', () => {
           res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(d);
         });
       });
-      pr.on('error', e => { res.writeHead(502); res.end(e.message); });
-      pr.write(fullBody); pr.end();
+
+      pr.on('error', e => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ err_no: 1003, err_msg: e.message }));
+      });
+
+      pr.write(postData);
+      pr.end();
     });
-  } else { res.writeHead(404); res.end('Not found'); }
+    return;
+  }
+
+  // 未知路由
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ err_no: 404, err_msg: 'Not found' }));
 }).listen(PORT, () => console.log('Proxy running on port', PORT));
