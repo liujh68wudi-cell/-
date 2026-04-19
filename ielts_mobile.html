@@ -546,10 +546,25 @@ function initSpeechRecognition(){
   };
   recognition.onerror=function(e){
     console.error('speech error',e);
+    const el=document.getElementById(currentTranscriptId);
     if(e.error==='not-allowed'){
-      const el=document.getElementById(currentTranscriptId);
-      if(el)el.textContent='❌ 麦克风权限被拒绝，请在浏览器设置中允许';
+      // 可能是临时允许后又失效，尝试重新请求
+      if(el)el.textContent='⚠️ 权限被拒绝，尝试重新请求...';
+      setTimeout(()=>{
+        try{recognition.start();}catch(e2){
+          if(el)el.textContent='❌ 麦克风权限被拒绝，请检查浏览器设置';
+          stopRecording();
+        }
+      },500);
+      return;
+    } else if(e.error==='no-speech'){
+      if(el)el.textContent='🎙️ 未检测到语音，请对着麦克风说话';
+      return;
+    } else if(e.error==='aborted'){
+      // 用户主动停止，不显示错误
+      return;
     }
+    if(el)el.textContent='❌ 识别出错: '+e.error;
     stopRecording();
   };
   recognition.onend=function(){
@@ -577,6 +592,57 @@ function startRecord(btn,id,text){
     }
     return;
   }
+  
+  // 每次点击都重新创建 recognition 对象，避免手机端状态问题
+  if(recognition){
+    try{recognition.abort();}catch(e){}
+  }
+  recognition=new SR();
+  recognition.continuous=true;
+  recognition.interimResults=true;
+  recognition.lang='en-US';
+  
+  let accumulatedTranscript='';
+  recognition.onresult=function(e){
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal){
+        accumulatedTranscript+=e.results[i][0].transcript+' ';
+      }else{
+        interim+=e.results[i][0].transcript;
+      }
+    }
+    if(currentTranscriptId){
+      const el=document.getElementById(currentTranscriptId);
+      const display=accumulatedTranscript+interim;
+      if(el)el.textContent=display.trim()||'🎙️ 正在识别...';
+    }
+    clearTimeout(silenceTimer);
+    silenceTimer=setTimeout(()=>{
+      if(isRecording){stopRecording();}
+    },5000);
+  };
+  recognition.onerror=function(e){
+    console.error('speech error',e);
+    const el=document.getElementById(currentTranscriptId);
+    if(e.error==='not-allowed'){
+      if(el)el.textContent='❌ 麦克风权限被拒绝，请刷新页面后重试';
+    }else if(e.error==='no-speech'){
+      if(el)el.textContent='🎙️ 未检测到语音，请对着麦克风说话';
+      return; // 不停止录音，继续等待
+    }else if(e.error==='aborted'){
+      return;
+    }
+    if(el)el.textContent='❌ 识别出错: '+e.error;
+    stopRecording();
+  };
+  recognition.onend=function(){
+    if(isRecording){
+      try{recognition.start();}catch(e){stopRecording();}
+    }
+  };
+  recognition._resetAccumulator=function(){accumulatedTranscript='';};
+
   // If already recording, stop it (toggle behavior)
   if(isRecording){stopRecording();return;}
 
