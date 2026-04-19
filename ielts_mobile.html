@@ -671,22 +671,53 @@ function startRecord(btn,id,text){
   const el=document.getElementById(tid);
   if(el)el.textContent='🎙️ 录音中... 点击■停止（说完后点停止）';
 
-  try{
-    recognition.start();
-    // 移动端：延迟设置超时，给浏览器时间初始化
-    clearTimeout(silenceTimer);
-    silenceTimer=setTimeout(()=>{
-      if(isRecording){
-        if(el&&el.textContent.includes('录音中')){
-          el.textContent='⚠️ 未检测到语音，请检查麦克风权限后重试';
-        }
-        stopRecording();
+  // 移动端预检查权限
+  if(/Mobi|Android/i.test(navigator.userAgent)){
+    const testRec=new SR();
+    testRec.lang='en-US';
+    testRec.onaudiostart=function(){
+      try{testRec.stop();}catch(e){}
+      // 权限OK，真正启动
+      startRecognition();
+    };
+    testRec.onerror=function(e){
+      const el=document.getElementById(currentTranscriptId);
+      if(el)el.textContent='❌ 麦克风权限被拒绝。请确认：1）已允许麦克风权限 2）使用HTTPS访问 3）不是隐身模式';
+      stopRecording();
+    };
+    try{testRec.start();}catch(e){
+      const el=document.getElementById(currentTranscriptId);
+      if(el)el.textContent='❌ 无法启动语音识别：'+e.message;
+      stopRecording();
+    }
+    // 预检查超时1.5秒后继续尝试启动
+    setTimeout(()=>{
+      if(isRecording&&el&&el.textContent.includes('录音中')){
+        startRecognition();
       }
-    },15000);
-  }catch(e){
-    console.error('Recognition start failed:',e);
-    if(el)el.textContent='❌ 启动失败: '+e.message||e.name||'unknown';
-    stopRecording();
+    },1500);
+  }else{
+    // 非移动端直接启动
+    startRecognition();
+  }
+
+  function startRecognition(){
+    try{
+      recognition.start();
+      clearTimeout(silenceTimer);
+      silenceTimer=setTimeout(()=>{
+        if(isRecording){
+          if(el&&el.textContent.includes('录音中')){
+            el.textContent='⚠️ 未检测到语音，请检查麦克风权限后重试';
+          }
+          stopRecording();
+        }
+      },15000);
+    }catch(e){
+      console.error('Recognition start failed:',e);
+      if(el)el.textContent='❌ 启动失败: '+(e.message||e.name||'unknown');
+      stopRecording();
+    }
   }
 }
 
