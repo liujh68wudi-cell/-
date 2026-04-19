@@ -615,7 +615,7 @@ async function recognizeByBaidu(blob) {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-    console.log('[ASR] Sending to proxy, base64 length:', base64.length, 'format: wav, rate: 16000, dev_pid:', '1737');
+    console.log('[ASR] Sending to proxy, audio bytes:', Math.round(base64.length * 3 / 4), 'base64 len:', base64.length, 'format: wav, rate: 16000');
     const res = await fetch(RENDER_PROXY + '/asr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -654,7 +654,12 @@ function startMediaRecording(stream) {
   if (!mimeType) mimeType = '';
   mediaChunks = [];
   try {
-    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+    var recOptions = mimeType ? { mimeType: mimeType } : {};
+    // 尝试设置 128kbps 高码率以提升音质
+    if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(mimeType || 'audio/webm')) {
+      recOptions.audioBitsPerSecond = 128000;
+    }
+    mediaRecorder = new MediaRecorder(stream, recOptions);
   } catch(e) {
     mediaRecorder = new MediaRecorder(stream);
   }
