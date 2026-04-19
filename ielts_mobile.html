@@ -591,18 +591,26 @@ let baiduTokenExpiry = 0;
 let baiduTokenLoading = false;
 let baiduTokenQueue = [];
 
+function baiduProxyFetch(url) {
+  return fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+}
+
 async function getBaiduToken() {
   if (baiduAccessToken && Date.now() < baiduTokenExpiry - 60000) return baiduAccessToken;
   if (baiduTokenLoading) return new Promise(resolve => baiduTokenQueue.push(resolve));
   baiduTokenLoading = true;
   try {
-    const res = await fetch(
-      'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=' +
-      BAIDU_API_KEY + '&client_secret=' + BAIDU_SECRET_KEY
-    );
+    const url = 'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=' +
+      BAIDU_API_KEY + '&client_secret=' + BAIDU_SECRET_KEY;
+    const res = await baiduProxyFetch(url);
     const data = await res.json();
-    baiduAccessToken = data.access_token;
-    baiduTokenExpiry = Date.now() + (data.expires_in || 2592000) * 1000;
+    if (data.error) {
+      console.error('Baidu token error:', data);
+      baiduAccessToken = null;
+    } else {
+      baiduAccessToken = data.access_token;
+      baiduTokenExpiry = Date.now() + (data.expires_in || 2592000) * 1000;
+    }
     baiduTokenLoading = false;
     baiduTokenQueue.forEach(r => r(baiduAccessToken));
     baiduTokenQueue = [];
@@ -610,6 +618,9 @@ async function getBaiduToken() {
   } catch (e) {
     baiduTokenLoading = false;
     console.error('Baidu token error:', e);
+    baiduAccessToken = null;
+    baiduTokenQueue.forEach(r => r(null));
+    baiduTokenQueue = [];
     return null;
   }
 }
