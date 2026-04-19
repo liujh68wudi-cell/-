@@ -623,17 +623,26 @@ function startRecord(btn,id,text){
     },5000);
   };
   recognition.onerror=function(e){
-    console.error('speech error',e);
+    console.error('speech error',e.error,'message:',e.message);
     const el=document.getElementById(currentTranscriptId);
+    if(el)el.textContent='❌ 识别出错: '+e.error+' ('+(e.message||'无详情')+')';
     if(e.error==='not-allowed'){
-      if(el)el.textContent='❌ 麦克风权限被拒绝，请刷新页面后重试';
+      // 可能是之前允许过但现在被撤销了，需要用户手动清除网站设置
+      if(el)el.textContent='❌ 麦克风权限被拒绝。请在手机Chrome设置中清除该网站的权限后重试：设置 → 网站设置 → 麦克风 → 允许';
+      // 尝试提示用户打开设置
+      setTimeout(()=>{
+        if(confirm('是否打开Chrome设置清除麦克风权限？')){
+          location.reload();
+        }
+      },2000);
     }else if(e.error==='no-speech'){
       if(el)el.textContent='🎙️ 未检测到语音，请对着麦克风说话';
       return; // 不停止录音，继续等待
     }else if(e.error==='aborted'){
       return;
+    }else if(e.error==='service-not-allowed'){
+      if(el)el.textContent='❌ 语音服务不可用，请检查网络或更换浏览器';
     }
-    if(el)el.textContent='❌ 识别出错: '+e.error;
     stopRecording();
   };
   recognition.onend=function(){
@@ -664,7 +673,7 @@ function startRecord(btn,id,text){
 
   try{
     recognition.start();
-    // Initial silence timeout: if no speech detected in 15s, stop
+    // 移动端：延迟设置超时，给浏览器时间初始化
     clearTimeout(silenceTimer);
     silenceTimer=setTimeout(()=>{
       if(isRecording){
@@ -676,7 +685,7 @@ function startRecord(btn,id,text){
     },15000);
   }catch(e){
     console.error('Recognition start failed:',e);
-    if(el)el.textContent='❌ 启动失败，请重试';
+    if(el)el.textContent='❌ 启动失败: '+e.message||e.name||'unknown';
     stopRecording();
   }
 }
