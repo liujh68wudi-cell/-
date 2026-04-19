@@ -775,13 +775,18 @@ function stopRecording() {
   stopMediaRecording().then(blob => {
     if (!blob || blob.size < 4000) { if (el) el.textContent = '⚠️ 录音太短，请重试'; return; }
     blobToWav(blob).then(wavBlob => {
+      const kb = (wavBlob.size / 1024).toFixed(1);
+      if (el) el.textContent = '⏳ 识别中...（音频 ' + kb + ' KB）';
       recognizeByBaidu(wavBlob).then(result => {
-        if (el) el.textContent = result.err ? '❌ ' + result.err : (result.text || '（未识别到内容）');
+        if (result.err) {
+          if (el) el.textContent = '❌ ' + result.err + ' [' + kb + ' KB]';
+        } else {
+          if (el) el.textContent = result.text || '（未识别到内容）';
+        }
       });
-    }).catch(() => {
-      recognizeByBaidu(blob).then(result => {
-        if (el) el.textContent = result.err ? '❌ ' + result.err : (result.text || '（未识别到内容）');
-      });
+    }).catch(err => {
+      console.error('[ASR] blobToWav failed:', err);
+      if (el) el.textContent = '❌ 音频转换失败，请重试';
     });
   });
 }
