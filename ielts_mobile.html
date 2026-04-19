@@ -703,7 +703,6 @@ function blobToWav(blob) {
           src.connect(offCtx.destination);
           src.start();
           offCtx.startRendering().then(resampledBuf => {
-          offCtx.startRendering().then(resampledBuf => {
             console.log('[ASR] Resampled:', nativeRate, '->', resampledBuf.sampleRate, 'Hz, samples:', resampledBuf.length);
             ac.close();
             // encodeWav 写入的 sampleRate = resampledBuf.sampleRate = 16000 ✅
