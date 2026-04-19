@@ -638,6 +638,98 @@ async function recognizeByBaidu(blob) {
   }
 }
 
+// ===== MediaRecorder =====
+// 变量声明
+let mediaRecorder = null;
+let mediaStream = null;
+let mediaChunks = [];
+
+// 开始录音
+function startMediaRecording(stream) {
+  mediaStream = stream;
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+  let mimeType = '';
+  for (const t of types) { try { if (MediaRecorder.isTypeSupported(t)) { mimeType = t; break; } } catch(e){} }
+  if (!mimeType) mimeType = '';
+  mediaChunks = [];
+  try {
+    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+  } catch(e) {
+    mediaRecorder = new MediaRecorder(stream);
+  }
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) mediaChunks.push(e.data); };
+  mediaRecorder.start(100);
+}
+
+// 停止录音，返回原始 blob（由 blobToWav 做格式转换）
+function stopMediaRecording() {
+  return new Promise(resolve => {
+    if (!mediaRecorder) { resolve(null); return; }
+    const rec = mediaRecorder;
+    const strm = mediaStream;
+    rec.onstop = () => {
+      if (strm) { try { strm.getTracks().forEach(t => t.stop()); } catch(e){} }
+      if (mediaChunks.length === 0) { resolve(null); return; }
+      const blob = new Blob(mediaChunks, { type: rec.mimeType || 'audio/webm' });
+      resolve(blob);
+    };
+    try { rec.stop(); } catch(e) { resolve(null); }
+  });
+}
+
+// blob 转 WAV
+function blobToWav(blob) {
+  return new Promise((resolve, reject) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      const reader = new FileReader();
+      reader.onload = () => {
+        audioCtx.decodeAudioData(reader.result).then(ab => {
+          const wav = encodeWav(ab, 1);
+          audioCtx.close();
+          resolve(wav);
+        }).catch(e => { audioCtx.close(); reject(e); });
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(blob);
+    } catch(e) { reject(e); }
+  });
+}
+
+// WAV 编码器（16bit PCM mono）
+function encodeWav(audioBuffer, numChannels) {
+  const sampleRate = audioBuffer.sampleRate;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const dataLength = audioBuffer.length * numChannels * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+  const ch0 = audioBuffer.getChannelData(0);
+  let offset = 0;
+  const writeStr = (s) => { for (let i = 0; i < s.length; i++) view.setUint8(offset++, s.charCodeAt(i)); };
+  writeStr('RIFF'); offset += 4;
+  view.setUint32(offset, 36 + dataLength, true); offset += 4;
+  writeStr('WAVE'); offset += 4;
+  writeStr('fmt '); offset += 4;
+  view.setUint32(offset, 16, true); offset += 4;
+  view.setUint16(offset, 1, true); offset += 2;
+  view.setUint16(offset, numChannels, true); offset += 2;
+  view.setUint32(offset, sampleRate, true); offset += 4;
+  view.setUint32(offset, sampleRate * blockAlign, true); offset += 4;
+  view.setUint16(offset, blockAlign, true); offset += 2;
+  view.setUint16(offset, bitsPerSample, true); offset += 2;
+  writeStr('data'); offset += 4;
+  view.setUint32(offset, dataLength, true); offset += 4;
+  for (let i = 0; i < audioBuffer.length; i++) {
+    const s = Math.max(-1, Math.min(1, ch0[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+// ===== /MediaRecorder =====
+// 
 // ===== /百度语音识别 =====
 
 function startRecord(btn, id, text) {
