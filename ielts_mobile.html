@@ -463,7 +463,6 @@ function markWritingDone(){
 // ---------- SPEAKING ----------
 function renderSpeaking(d){
   const s=d.speaking;
-  initSpeechRecognition();
   contentArea.innerHTML+=`
     <div class="card" style="margin-top:0">
       <div style="font-size:12px;color:#9ca3af;margin-bottom:4px">🎤 口语练习</div>
@@ -595,47 +594,39 @@ function baiduProxyFetch(url) {
   return fetch('https://corsproxy.io/?' + encodeURIComponent(url));
 }
 
+// 硬编码 token（有效期30天，失效后需重新获取并更新）
+const HARDCODED_BAIDU_TOKEN = '24.34578a22a90581478a6358399d427b26.2592000.1779167502.282335-122942313';
+const RENDER_PROXY = 'https://phbmkrr0pd.onrender.com';
+
 async function getBaiduToken() {
-  if (baiduAccessToken && Date.now() < baiduTokenExpiry - 60000) return baiduAccessToken;
-  if (baiduTokenLoading) return new Promise(resolve => baiduTokenQueue.push(resolve));
-  baiduTokenLoading = true;
-  try {
-    const url = 'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=' +
-      BAIDU_API_KEY + '&client_secret=' + BAIDU_SECRET_KEY;
-    const res = await baiduProxyFetch(url);
-    const data = await res.json();
-    if (data.error) {
-      console.error('Baidu token error:', data);
-      baiduAccessToken = null;
-    } else {
-      baiduAccessToken = data.access_token;
-      baiduTokenExpiry = Date.now() + (data.expires_in || 2592000) * 1000;
-    }
-    baiduTokenLoading = false;
-    baiduTokenQueue.forEach(r => r(baiduAccessToken));
-    baiduTokenQueue = [];
-    return baiduAccessToken;
-  } catch (e) {
-    baiduTokenLoading = false;
-    console.error('Baidu token error:', e);
-    baiduAccessToken = null;
-    baiduTokenQueue.forEach(r => r(null));
-    baiduTokenQueue = [];
-    return null;
-  }
+  return HARDCODED_BAIDU_TOKEN;
 }
 
 async function recognizeByBaidu(blob) {
   const token = await getBaiduToken();
   if (!token) return { err: '无法获取百度API认证，请检查网络' };
   try {
-    const form = new FormData();
-    form.append('speech', blob, 'recording.pcm');
-    form.append('format', 'pcm');
-    form.append('rate', '16000');
-    form.append('dev_pid', '1737');
-    form.append('token', token);
-    const res = await fetch('https://vop.baidu.com/server_api', { method: 'POST', body: form });
+    const reader = new FileReader();
+    const base64 = await new Promise((resolve, reject) => {
+      reader.onload = () => {
+        const b64 = reader.result.split(',')[1];
+        resolve(b64 || '');
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const res = await fetch(RENDER_PROXY + '/asr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        speech: base64,
+        token: token,
+        format: 'wav',
+        rate: 16000,
+        dev_pid: '1737',
+        channel: 1
+      })
+    });
     const data = await res.json();
     if (data.err_no === 0 || data.errno === 0) {
       return { text: (data.result || []).join('').trim() };
@@ -647,64 +638,6 @@ async function recognizeByBaidu(blob) {
   }
 }
 
-// MediaRecorder
-let mediaRecorder = null;
-let mediaStream = null;
-let mediaChunks = [];
-
-function startMediaRecording(stream) {
-  mediaStream = stream;
-  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
-  let mimeType = types.find(t => MediaRecorder.isTypeSupported(t)) || '';
-  mediaChunks = [];
-  mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) mediaChunks.push(e.data); };
-  mediaRecorder.start();
-}
-
-function stopMediaRecording() {
-  return new Promise(resolve => {
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') { resolve(null); return; }
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-      mediaChunks = [];
-      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-      mediaRecorder = null;
-      resolve(blob);
-    };
-    mediaRecorder.stop();
-  });
-}
-
-function blobToWav(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        ctx.decodeAudioData(e.target.result, decoded => {
-          const ch = decoded.getChannelData(0);
-          const raw = new Int16Array(ch.length);
-          for (let i = 0; i < ch.length; i++) raw[i] = Math.max(-32768, Math.min(32767, Math.round(ch[i] * 32767)));
-          const wav = new ArrayBuffer(44 + raw.length * 2);
-          const view = new DataView(wav);
-          const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
-          ws(0, 'RIFF'); view.setUint32(4, 36 + raw.length * 2, true);
-          ws(8, 'WAVE'); ws(12, 'fmt '); view.setUint32(16, 16, true);
-          view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-          view.setUint32(24, 16000, true); view.setUint32(28, 32000, true);
-          view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-          ws(36, 'data'); view.setUint32(40, raw.length * 2, true);
-          const dv = new DataView(wav, 44);
-          for (let i = 0; i < raw.length; i++) dv.setInt16(i * 2, raw[i], true);
-          resolve(new Blob([wav], { type: 'audio/wav' }));
-        }, reject);
-      } catch (e) { reject(e); }
-    };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(blob);
-  });
-}
 // ===== /百度语音识别 =====
 
 function startRecord(btn, id, text) {
@@ -748,7 +681,7 @@ function stopRecording() {
   if (el) el.textContent = '⏳ 识别中...';
   if (recBtn) { recBtn.classList.remove('recording'); recBtn.innerHTML = '<i class="fas fa-microphone"></i>'; recBtn = null; }
   stopMediaRecording().then(blob => {
-    if (!blob || blob.size < 1000) { if (el) el.textContent = '⚠️ 录音太短，请重试'; return; }
+    if (!blob || blob.size < 4000) { if (el) el.textContent = '⚠️ 录音太短，请重试'; return; }
     blobToWav(blob).then(wavBlob => {
       recognizeByBaidu(wavBlob).then(result => {
         if (el) el.textContent = result.err ? '❌ ' + result.err : (result.text || '（未识别到内容）');
